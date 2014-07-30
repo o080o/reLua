@@ -6,6 +6,44 @@
 local re = {}
 
 
+local DefaultTable = {}
+DefaultTable.__index = DefaultTable
+setmetatable(DefaultTable, DefaultTable)
+function DefaultTable.__call(table, val)
+	local self = {}
+	local mt = {}
+	if type(val) == "function" then
+		mt.__index = function(table, key)
+			local v = val(key)
+			table[key] = v
+			return v	
+		end
+	elseif type(val) == "table" then
+		mt.__index = function(table, key)
+			local t = {}
+			for k,v in pairs(val) do
+				t[k]=v
+			end
+			table[key] = t
+			return t
+		end
+	else
+		mt.__index = function(table, key)
+			 table[key] = val
+			return val
+		end
+	end
+	return setmetatable(self, mt)
+end
+
+local ListTable = {}
+ListTable.__index = ListTable
+setmetatable(ListTable, ListTable)
+function ListTable.__call()
+	return DefaultTable({})
+end
+
+
 local Tree = {}
 Tree.__index = Tree
 -- function newTree(* val, {Tree} children) return Tree A Tree object with val as its value and *children* for children
@@ -104,11 +142,16 @@ end
 --data NFA.edges = [{Input:[State]}]
 --data State = Table Holds some arbitrary state information
 --data Input = Char
+local i = 0
 local State = {}
 State.__index = State
 -- function State.new() return State A new state
 function State.new()
-	return setmetatable({}, State)
+	i = i + 1
+	return setmetatable({id=tostring(i)}, State)
+end
+function State.__tostring(self)
+	return "State: " .. self.id
 end
 
 
@@ -119,96 +162,71 @@ NDFA.__index = NDFA
 -- function NDFA.new() return NDFA A new machine with only a single state and no final states.
 function NDFA.new()
 	local m = {}
-	m.states = {State.new()}
-	m.edges = {}
+	local initState = State.new()
+	m.start = initState
+
+	m.states = {}
+	m.states[initState]=true
+
+	m.edges = DefaultTable( function() return ListTable() end )
 	m = setmetatable(m, NDFA)
 	return m
 end
 
---function NDFA.final(self) return {State} The final states of the machine
+--function NDFA.final(self) return [State] The final states of the machine
 function NDFA:final()
 	local states = {}
-	for i,s in pairs(self.states) do
+	for s,_ in pairs(self.states) do
 		if s.isFinal then
-			states[i] = s
+			table.insert(states, s)
 		end
 	end
 	return states
 end
 
---function NDFA:addEdge(Int source, Input input, Int dest) create an edge leading from source to dest given the input.
+--function NDFA:addEdge(State source, Input input, State dest) create an edge leading from source to dest given the input.
 function NDFA:addEdge(source, input, dest)
+	print(source, input, dest)
 	if not self.edges[source] then self.edges[source] = {} end
 	if not self.edges[source][input] then self.edges[source][input] = {} end
 	table.insert(self.edges[source][input], dest )
 end
 
---function NDFA:insert(NDFA m) return NDFA A machine with the states and edges of m added to self with no link between them.
+--function NDFA:insert(NDFA m) return NDFA A machine with the states and edges of m added to self with no link between them. 
 function NDFA:insert(m)
-	local nStates = #self.states
-	-- add all states in m to self
-	for i,s in pairs(m.states) do
-		local i2 = i + nStates
-		self.states[i2] = s
-		if m.edges[i] then
-			for input, states in pairs(m.edges[i]) do
-				for k,dest in pairs(states) do
-					self:addEdge(i2, input, dest+nStates)
-				end
-			end
-		end
+	-- add all states in m to self and copy edges
+	for s,_ in pairs(m.states) do
+		self.states[s] = true
+		self.edges[s] = m.edges[s]
 	end
-	-- check if for onDeath method
-	--[[
-	if m.onDeath then
-		-- add some stuff to detect when this partial machine dies
-		self.partials[n] = {}
-		self.partials[n].states = {...}
-		self.partials[n].onDeath = m.onDeath
-		m.states[1].hit = function(self,state,c)
-			m.states[1].hit(self,state,c)
-			self.partials[n].isAlive = true
-		end
-
-	end
-	--]]
 	return self
 end
 
 --function NDFA:concat(NDFA m1, NDFA m2) return NDFA A new NDFA resulting from concatenating m2 to m1
 function NDFA.concat(m1, m2)
-	local m1States = #m1.states
 	-- link all end states of m1 to the start of m2
+	local m2Start = m2.start
+	print("concating")
 	for i,s in pairs(m1:final()) do
 		s.isFinal = false
-		m1:addEdge( i, "EPSILON", m1States+1 )
+		m1:addEdge( s, "EPSILON", m2Start )
 	end
 	m1:insert(m2)
-
-
 	return m1
 end
 
--- function NDFA:addState(Int source, Input input, Bool final) Add a new State to this machine, adding edges from the given state ID to it.
+-- function NDFA:addState(State source, Input input, Bool final) Add a new State to this machine, adding edges from the given state ID to it.
 function NDFA:addState(source, input, final)
 	local state = State.new() 
 	if final then 
 		state.isFinal = true
 	end
-	table.insert(self.states, state)
+	--table.insert(self.states, state)
+	self.states[state] = true
 	if source and input then
-		self:addEdge(source, input, #self.states)
+		self:addEdge(source, input, state)
 	end
-	return #self.states
-end
-
-printMatches = function(name,subMatches)
-	for name, matches in pairs(subMatches) do
-		for _,match in ipairs(matches) do
-			print(match)
-			print(name, match.start, match.finish)
-		end
-	end
+	return state
 end
 
 function NDFA:execute(input)
@@ -216,21 +234,23 @@ function NDFA:execute(input)
 	self:init(input)
 	local match = true
 	for c in input:gmatch(".") do
-		print(c)
+		print("in:", c)
 		if not self:step(c) then
 			match = false
 			break
 		end
 		self.steps = self.steps + 1
-		for i,s in ipairs(self.curState) do
+		--execute "hit" functions in states
+		for s,path in pairs(self.curState) do
+			print(path)
 			--print("state:",i, s[1], s[2])
-			if s[2].hit then s[2].hit(self,s[2],c) end
+			if s.hit then s.hit(self,s,c, path) end
 		end
 	end
 	if match then
 		print(self.regex,"Matched:", input)
 		local matches = self.subMatches
-		printMatches("root",matches)
+		--printMatches("root",matches)
 	else
 		print(self.regex,"Failed:", input)
 	end
@@ -239,102 +259,104 @@ end
 
 function NDFA:init(input)
 	print("Init")
-	self.curState = eClosure(self, 1)
+	self.curState = {}
+	for s,_ in pairs( eClosure(self, self.start) ) do
+		self.curState[s] = {}
+	end
 	self.subMatches = {} -- completed matches
 	self.partialMatches = {} -- partial, incomplete, matches
+
 	self.steps = 0
 	self.input = input
-	for i,s in ipairs(self.curState) do
-		print("istate:",i, s[1], s[2])
-		if s[2].hit then s[2].hit(self,s[2],"") end
+	for s,path in pairs(self.curState) do
+		print("istate:", s, path)
+		if s.hit then s.hit(self,s,"",path) end
 	end
 end
 
+function compare( path1, path2)
+	return path1
+end
+
+function copy(path)
+	local newpath = {}
+	for k,v in pairs(path) do
+		newpath[k] = v
+	end
+	return path
+end
 function NDFA:step(input)
 	local nextState = {}
-	local isDead = false
-	for _,s2 in pairs(self.curState) do
-		local i = s2[1]
-		local s = s2[2]
-		if self.edges[i] and self.edges[i][input] then
-			isDead = true
-			for _,n in pairs(self.edges[i][input]) do
-				eClosure(self, n, nextState)
+	local isAlive = false
+	for state,path in pairs(self.curState) do
+		for _,s in pairs(self.edges[state][input]) do
+			isAlive = true
+			newstates = eClosure(self, s)
+			for k,v in pairs(newstates) do
+				print("oo", k, v)
+				if nextState[k] then
+					nextState[k] = copy( compare( path, nextState[k]) )
+				else
+					nextState[k] = copy( path )
+				end
 			end
 		end
 	end
 	self.curState = nextState
-	return isDead
+	return isAlive
 end
 
--- function NDFA:Print() Print a representation of an NDFA
-function NDFA:print()
-	for i,s in pairs(self.states) do
-		print(i,s)
-	end
-
-	for source,e in pairs(self.edges) do
-		print(source,":")
-		for input,v in pairs(e) do
-			for i,dest in pairs(v) do
-				print(source, input, "->",dest)
-			end
-		end
-	end
+function NDFA.__tostring(self)
+	return "NDFA: " .. self
 end
 
 --function eClosure(NDFA, Int) return {Int:State} List of all states accessible via epsilon transitions from the given state
-function eClosure(m, i, prevStates)
+function eClosure(m, start, prevStates)
+	if not m.cache then m.cache = ListTable() end
+	if not m.cache.eClosure.copyops then m.cache.eClosure.copyops = ListTable() end
+	val = eClosure2(m, start, prevStates)
 
-	-- check for cached value
-	if not m.cache then m.cache = {} end
-	if not m.cache.eClosure then m.cache.eClosure = {} end
-	local cached = m.cache.eClosure[i]
-	local states
-
-	if cached then
-		states = cached
-	else
-		states = {}
-		states.lookup = {}
-		if prevStates and prevStates.lookup then
-			for k,_ in pairs(prevStates.lookup) do
-				states.lookup[k] = true
+	-- perform all cache copy operations not what we are in the lowest level recursion
+	for src, destinations in pairs(m.cache.eClosure.copyops) do
+		for _,dst in pairs(destinations) do
+			local cache = m.cache.eClosure[dst]
+			cache.clean = true
+			for k,v in pairs( m.cache.eClosure[src] ) do
+				cache[k] = v
 			end
 		end
-		
+		m.cache.eClosure.copyops[src] = nil
+	end
+	return val
+end
+function eClosure2(m, start, prevStates)
+	-- caches results, as well as results of intermediate steps, even with cyclic graphs
+	prevStates = prevStates or {}
+
+	local states = m.cache.eClosure[start] or {}
+	if not states.clean then
+		setmetatable(states, {__index=prevStates}) -- set __index metamethod to avoid recursion by inclusion testing, but doin't add it to the list of found states so far
 		-- add the initial state
-		if not states.lookup[i] then
-			states.lookup[i] = true
-			table.insert(states, {i, m.states[i]})
-		end
+		states[start] = true; states.clean = true
 
 		-- find all states with Epsilon transitions from here
-		local nextStates
-		if m.edges[i] then
-			nextStates = m.edges[i]["EPSILON"]
-		end
-		if nextStates then
-			for _,s in pairs(nextStates) do
-				if not states.lookup[s] then
-					table.insert(states, {s,m.states[s]})
-					states.lookup[s] = true
-					local moreStates = eClosure(m,s, states)
-				end
+		for _,s in pairs( m.edges[start]["EPSILON"]) do
+			if not states[s] then -- test to avoid infinite recursion
+				eClosure2(m,s, states)
+			else
+				-- possible infinite recursion. defer caching
+				states.clean = false
+				table.insert( m.cache.eClosure.copyops[s], start)
 			end
 		end
-		-- cache it!
-		m.cache.eClosure[i] = states
+		m.cache.eClosure[start] = setmetatable( states, {})-- remove metatable so that the cache is not influenced by prevStates
 	end
-	if not prevStates then prevStates = {} end
-	if not prevStates.lookup then prevStates.lookup = {} end
-	for _,v in ipairs(states) do
-		table.insert(prevStates, v)
+
+	for s,_ in pairs(states) do
+		prevStates[s] = true
 	end
-	for k,_ in pairs(states.lookup) do
-		prevStates.lookup[k] = true
-	end
-	return prevStates
+	prevStates.clean = nil -- dont copy the cache's "clean" field...
+	return prevStates, cacheThingyTable
 end
 
 -- function compile(String) return Regex
@@ -342,9 +364,8 @@ end
 function re.compile(regex)
 	local ast = parse(regex)
 	local names = {"One", "Two", "Three", "Four?"}
-	local nfa = buildNDFA(ast, {captureNames=names})
+	local nfa = buildNDFA(ast, {captureNames=names, groupN=0})
 	nfa.regex = regex
-	nfa:print()
 	return nfa
 end
 
@@ -353,19 +374,20 @@ function buildNDFA(ast, state)
 	local mt = {}
 	mt.__index = function(table, key)
 		if not key then print("nil literal?") else
-			print(key)
+			print("lit:",key)
 		end
 		return function(machines)
 			local m = NDFA.new()
-			m:addState(1,key,true)
+			m:addState(m.start,key,true)
 			return m
 		end
 	end
 	local fragments = setmetatable({}, mt)
 	function fragments.CONCAT(machines)
 		local m0 = nil
-		for _,m1 in pairs(machines) do
+		for _,m1 in ipairs(machines) do
 			if m0 then
+				print("c1")
 				m0:concat(m1) 
 			else
 				m0 = m1
@@ -373,21 +395,40 @@ function buildNDFA(ast, state)
 		end
 		return m0
 	end
+--[[
 	function fragments.PLUS(machines)
 		local m = machines[1]
 		local finalStates = m:final()
-		for i,_ in pairs(finalStates) do
-			m:addEdge(i, "EPSILON", 1)
+		for _,s in pairs(finalStates) do
+			m:addEdge(s, "EPSILON", m.start)
 		end
 		return m
 	end
-	function fragments.STAR(machines)
-		local m = machines[1]
-		local si=m:addState(nil,nil, true)
-		m:addEdge(1,"EPSILON", si)
-		local finalStates = m:final()
-		for i,_ in pairs(finalStates) do
-			m:addEdge(i, "EPSILON", 1)
+--]]
+	function fragments.STAR(machines, buildState)
+		local m = NDFA.new()
+		m.start.isFinal = true
+		m:concat(machines[1])
+		local final = m:addState(m.start, "EPSILON", true)
+		print("startgrouper", m.start)
+		print("finalgrouper", final)
+		m:addEdge(final,"EPSILON", m.start)
+		local finalStates = machines[1]:final()
+		for _,s in pairs(finalStates) do
+			m:addEdge(s, "EPSILON", final)
+		end
+		buildState.groupN = buildState.groupN + 1
+		local i= buildState.groupN
+		function m.start.hit(self, state, c, path)
+			print("start group")
+			path[i] = { maxify=true, start=self.steps }
+		end
+		function final.hit(self, state, c, path)
+			print("what", path)
+			print(path[i])
+			if path[i] then
+				path[i].stop = self.steps
+			end
 		end
 		return m
 	end
@@ -395,10 +436,10 @@ function buildNDFA(ast, state)
 		local m = NDFA.new()
 		local m1 = machines[1]
 		local m2 = machines[2]
-		m:addEdge(1, "EPSILON", #m.states + 1)
 		m:insert(m1)
-		m:addEdge(1, "EPSILON", #m.states + 1)
 		m:insert(m2)
+		m:addEdge(m.start, "EPSILON", m1.start)
+		m:addEdge(m.start, "EPSILON", m2.start)
 		return m
 	end
 	function fragments.ROOT(...)
@@ -416,18 +457,18 @@ function buildNDFA(ast, state)
 		--print("names:", buildState.captureNames)
 		local name = table.remove( buildState.captureNames, 1)
 		print("capture:", name)
-		m1.states[1].isFinal = true
-		m1.states[1].captureName = name
-		m1.states[1].hit = function(self,state,c)
+		m1.start.isFinal = true
+		m1.start.captureName = name
+		m1.start.hit = function(self,state,c)
 			local match = {name=state.captureName, start=self.steps}
 			print("start name:", match.name)
 			self.partialMatches[state.captureName] = match
 		end
 		local m2 = machines[1]
 		local m3 = NDFA.new()
-		m3.states[1].isFinal =  true
-		m3.states[1].captureName = name
-		m3.states[1].hit = function(self,state,c)
+		m3.start.isFinal =  true
+		m3.start.captureName = name
+		m3.start.hit = function(self,state,c)
 			local name = state.captureName
 			print("name", name)
 			local match = self.partialMatches[name]
@@ -441,10 +482,8 @@ function buildNDFA(ast, state)
 			table.insert(self.subMatches[name], match)
 		end
 
+		print("c2")
 		m1:concat(m2):concat(m3)
-		m1.onDeath = function(self,c)
-			print("Capture ", buildState.captureNames, "death")
-		end
 		return m1
 	end
 

@@ -232,11 +232,9 @@ end
 function NDFA:execute(input)
 	print("exec:", input)
 	self:init(input)
-	local match = true
 	for c in input:gmatch(".") do
 		print("in:", c)
 		if not self:step(c) then
-			match = false
 			break
 		end
 		self.steps = self.steps + 1
@@ -247,6 +245,14 @@ function NDFA:execute(input)
 			if s.hit then s.hit(self,s,c, path) end
 		end
 	end
+	local match = false
+	for _,s in pairs( self:final() ) do
+		if self.curState[s] then
+			match=true
+			break
+		end
+	end
+	
 	if match then
 		print(self.regex,"Matched:", input)
 		local matches = self.subMatches
@@ -275,16 +281,20 @@ function NDFA:init(input)
 end
 
 function compare( path1, path2)
+	if not path2 then return path1 end
 	return path1
 end
 
+copyops = 0
 function copy(path)
+	copyops = copyops + 1 -- keep track of table creation operations for debugging/performance reasons.
 	local newpath = {}
 	for k,v in pairs(path) do
 		newpath[k] = v
 	end
 	return path
 end
+
 function NDFA:step(input)
 	local nextState = {}
 	local isAlive = false
@@ -293,12 +303,7 @@ function NDFA:step(input)
 			isAlive = true
 			newstates = eClosure(self, s)
 			for k,v in pairs(newstates) do
-				print("oo", k, v)
-				if nextState[k] then
-					nextState[k] = copy( compare( path, nextState[k]) )
-				else
-					nextState[k] = copy( path )
-				end
+				nextState[k] = copy( compare( path, nextState[k] ) )
 			end
 		end
 	end
@@ -421,13 +426,15 @@ function buildNDFA(ast, state)
 		local i= buildState.groupN
 		function m.start.hit(self, state, c, path)
 			print("start group")
-			path[i] = { maxify=true, start=self.steps }
+			-- use as an array to avoid unnessesary table creation when we clone paths.
+			path[i*3] = true
+			path[i*3 +1] = self.steps
+			path[i*3 +2] = nil
 		end
 		function final.hit(self, state, c, path)
 			print("what", path)
-			print(path[i])
-			if path[i] then
-				path[i].stop = self.steps
+			if path[i*3 +1] then
+				path[i*3 +2] = self.steps
 			end
 		end
 		return m

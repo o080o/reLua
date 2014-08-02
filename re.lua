@@ -113,6 +113,14 @@ grammar["+"]=function(root,stack)
 	end
 	return root
 end
+grammar["-"]=function(root,stack)
+	if root.children[1].val == "CONCAT" then
+		root.children[1].children[2] = Tree.new("MINUS", {root.children[1].children[2]})
+	else
+		root.children[1] = Tree.new("MINUS", {root.children[1]})
+	end
+	return root
+end
 grammar["*"]=function(root,stack)
 	if root.children[1].val == "CONCAT" then
 		root.children[1].children[2] = Tree.new("STAR", {root.children[1].children[2]})
@@ -329,9 +337,9 @@ function compare( path1, path2)
 	print(" ", path2)
 
 	for n = 1,nGroups*3,3 do
-		print("n:", n)
 		assert( path1[n] == path2[n], "Mismatched maximality for group" )
 		local maxify = path1[n +0] 
+		print("group:", n, maxify)
 
 		local len1, len2 = 0,0
 		print(path1[n+2], path1[n+1], path2[n+2], path2[n+1])
@@ -339,8 +347,10 @@ function compare( path1, path2)
 		if path2[n+2] then len2 = path2[n+2] - path2[n+1] end
 
 		if len1>len2 then
+			if maxify then print("","",path1) else print("","",path2) end
 			if maxify then return path1 else return path2 end
 		elseif len2>len1 then
+			if maxify then print("","",path2) else print("","",path1) end
 			if maxify then return path2 else return path1 end
 		end
 
@@ -504,6 +514,12 @@ function buildNDFA(ast, state)
 		return m
 	end
 --]]
+	function fragments.MINUS(machines, buildState)
+		local m = fragments.STAR(machines, buildState)
+		local i= buildState.groupN
+		m.start.hit = startGroup(i, false)
+		return m
+	end
 	function fragments.STAR(machines, buildState)
 		local m = NDFA.new()
 		local m1 = machines[1]

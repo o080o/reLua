@@ -142,13 +142,13 @@ end
 --data NFA.edges = [{Input:[State]}]
 --data State = Table Holds some arbitrary state information
 --data Input = Char
-local i = 0
+local stateIdx = 0
 local State = {}
 State.__index = State
 -- function State.new() return State A new state
 function State.new()
-	i = i + 1
-	return setmetatable({id=tostring(i)}, State)
+	stateIdx = stateIdx + 1
+	return setmetatable({id=tostring(stateIdx)}, State)
 end
 function State.__tostring(self)
 	return "State: " .. self.id
@@ -237,13 +237,11 @@ function NDFA:execute(input)
 		if not self:step(c) then
 			break
 		end
-		self.steps = self.steps + 1
 		--execute "hit" functions in states
-		for s,path in pairs(self.curState) do
-			print(path)
+		--for s,path in pairs(self.curState) do
 			--print("state:",i, s[1], s[2])
-			if s.hit then s.hit(self,s,c, path) end
-		end
+			--if s.hit then s.hit(self,s,c, path) end
+		--end
 	end
 	local match = false
 	for _,s in pairs( self:final() ) do
@@ -255,59 +253,135 @@ function NDFA:execute(input)
 	
 	if match then
 		print(self.regex,"Matched:", input)
-		local matches = self.subMatches
-		--printMatches("root",matches)
+		self:printMatches()
 	else
 		print(self.regex,"Failed:", input)
 	end
 	return match
 end
 
+function NDFA:printMatches()
+	local finals = self:final()
+	local path
+	for _,s in pairs(finals) do
+		local path1 = self.curState[s]
+		path = compare(path1, path)
+	end
+	for n = 1,path.nGroups*3,3 do
+		if path[n+1] and path[n+2] then
+			print("match: ", (n-1)/3+1, "["..path[n+1]..":"..path[n+2].."]", self.input:sub(path[n+1], path[n+2]))
+		end
+	end
+end
+
+local Path = {}
+Path.__index = Path
+
+function Path.new(...)
+	return setmetatable({nGroups=0}, Path)
+end
+function Path.__tostring(path)
+	local str = {}
+	table.insert( str, "Path:")
+	for n = 1,path.nGroups*3,3 do
+		table.insert(str, "  group:")
+		table.insert(str, (n-1)/3+1)
+		if path[n+1] then
+			table.insert(str, " [")
+			table.insert(str, path[n+1])
+			table.insert(str, ":")
+			if path[n+2] then table.insert(str, path[n+2])
+			else table.insert(str, "...") end
+			table.insert(str, "]")
+		else
+			table.insert(str, " None")
+		end
+	end
+	return table.concat(str)
+end
 function NDFA:init(input)
 	print("Init")
+	self.steps = 0
+	self.input = input
 	self.curState = {}
-	for s,_ in pairs( eClosure(self, self.start) ) do
-		self.curState[s] = {}
+	for s,fs in pairs( eClosure(self, self.start) ) do
+		local path = Path.new()
+		for _,f in ipairs(fs) do
+			f(self, s, "", path)
+		end
+		self.curState[s] = path
 	end
 	self.subMatches = {} -- completed matches
 	self.partialMatches = {} -- partial, incomplete, matches
 
-	self.steps = 0
-	self.input = input
 	for s,path in pairs(self.curState) do
 		print("istate:", s, path)
-		if s.hit then s.hit(self,s,"",path) end
+		--if s.hit then s.hit(self,s,"",path) end
 	end
 end
 
 function compare( path1, path2)
 	if not path2 then return path1 end
+	-- compare path1 to path2 and return the optimal one.
+	local nGroups = math.max( path1.nGroups, path2.nGroups)
+	print("compare:")
+	print(" ", path1)
+	print(" ", path2)
+
+	for n = 1,nGroups*3,3 do
+		print("n:", n)
+		assert( path1[n] == path2[n], "Mismatched maximality for group" )
+		local maxify = path1[n +0] 
+
+		local len1, len2 = 0,0
+		print(path1[n+2], path1[n+1], path2[n+2], path2[n+1])
+		if path1[n+2] then len1 = path1[n+2] - path1[n+1] end
+		if path2[n+2] then len2 = path2[n+2] - path2[n+1] end
+
+		if len1>len2 then
+			if maxify then return path1 else return path2 end
+		elseif len2>len1 then
+			if maxify then return path2 else return path1 end
+		end
+
+		-- so far they are equivilent if we have not returned by now.
+	end
+	-- all groupings are equivilent
 	return path1
 end
 
 copyops = 0
 function copy(path)
 	copyops = copyops + 1 -- keep track of table creation operations for debugging/performance reasons.
-	local newpath = {}
+	local newpath = Path.new()
 	for k,v in pairs(path) do
 		newpath[k] = v
 	end
-	return path
+	return newpath
 end
 
 function NDFA:step(input)
 	local nextState = {}
 	local isAlive = false
+	self.steps = self.steps + 1
 	for state,path in pairs(self.curState) do
 		for _,s in pairs(self.edges[state][input]) do
 			isAlive = true
 			newstates = eClosure(self, s)
-			for k,v in pairs(newstates) do
-				nextState[k] = copy( compare( path, nextState[k] ) )
+			for state,fs in pairs(newstates) do
+				local newpath = copy( path )
+				for _,f in ipairs(fs) do
+					f(self, state, input, newpath)
+				end
+				nextState[state] = compare( newpath, nextState[state] )
 			end
 		end
 	end
 	self.curState = nextState
+	print("current state:")
+	for state,path in pairs(self.curState) do
+		print("", state, path)
+	end
 	return isAlive
 end
 
@@ -315,53 +389,50 @@ function NDFA.__tostring(self)
 	return "NDFA: " .. self
 end
 
---function eClosure(NDFA, Int) return {Int:State} List of all states accessible via epsilon transitions from the given state
-function eClosure(m, start, prevStates)
-	if not m.cache then m.cache = ListTable() end
-	if not m.cache.eClosure.copyops then m.cache.eClosure.copyops = ListTable() end
-	val = eClosure2(m, start, prevStates)
+--function eClosure(NDFA, Int) return {State:[Function]} List of all states accessible via epsilon transitions from the given state, and a list of functions to execute for that state. This function is cached, and the returned table should NOT be modified.
+function eClosure(m, start, mutable)
+	if not m.cache then m.cache = DefaultTable( function() return ListTable() end ) end
+	local cache = m.cache.eClosure[start]
+	if cache.clean then 
+		return cache.val --return the actual cache, assuming caller will not attempt to modify it
+	else
 
-	-- perform all cache copy operations not what we are in the lowest level recursion
-	for src, destinations in pairs(m.cache.eClosure.copyops) do
-		for _,dst in pairs(destinations) do
-			local cache = m.cache.eClosure[dst]
-			cache.clean = true
-			for k,v in pairs( m.cache.eClosure[src] ) do
-				cache[k] = v
-			end
-		end
-		m.cache.eClosure.copyops[src] = nil
+		print("eClosure:", start)
+		val = eClosure2(m, start, {}, {}, 1)
+		-- cache it
+		cache.val = val; cache.clean = true
+		return val
 	end
-	return val
 end
-function eClosure2(m, start, prevStates)
-	-- caches results, as well as results of intermediate steps, even with cyclic graphs
-	prevStates = prevStates or {}
+function eClosure2(m, start, prevStates, depthTable, depth)
+	print("", start, start.hit)
 
-	local states = m.cache.eClosure[start] or {}
-	if not states.clean then
-		setmetatable(states, {__index=prevStates}) -- set __index metamethod to avoid recursion by inclusion testing, but doin't add it to the list of found states so far
-		-- add the initial state
-		states[start] = true; states.clean = true
+	local cache = m.cache.eClosure[start]
+	-- no more intermediate caching
+		local states = {}
+
+		-- add the initial state and compile the function list
+		states[start] = {}
+		depthTable[start] = depth
 
 		-- find all states with Epsilon transitions from here
 		for _,s in pairs( m.edges[start]["EPSILON"]) do
-			if not states[s] then -- test to avoid infinite recursion
-				eClosure2(m,s, states)
-			else
-				-- possible infinite recursion. defer caching
-				states.clean = false
-				table.insert( m.cache.eClosure.copyops[s], start)
+			if not depthTable[s] or depthTable[s] > depth then
+				eClosure2(m,s, states, depthTable, depth+1)
 			end
 		end
-		m.cache.eClosure[start] = setmetatable( states, {})-- remove metatable so that the cache is not influenced by prevStates
-	end
-
-	for s,_ in pairs(states) do
-		prevStates[s] = true
-	end
-	prevStates.clean = nil -- dont copy the cache's "clean" field...
-	return prevStates, cacheThingyTable
+		-- copy start.hit function into the cache
+		if start.hit then 
+			for k,v in pairs(states) do
+				print("", "", "adding:", start, start.hit, "into", k)
+				table.insert( v, 1, start.hit)
+			end
+		end
+		-- copy this value into the prevStates table.
+		for k,v in pairs(states) do
+			prevStates[k]=v
+		end
+	return prevStates 
 end
 
 -- function compile(String) return Regex
@@ -369,11 +440,34 @@ end
 function re.compile(regex)
 	local ast = parse(regex)
 	local names = {"One", "Two", "Three", "Four?"}
+	stateIdx = 0
 	local nfa = buildNDFA(ast, {captureNames=names, groupN=0})
 	nfa.regex = regex
 	return nfa
 end
 
+-- helper functions for building NDFA's with submatching enabled.
+function startGroup(i, maxify)
+	return function(self, state, c, path)
+		local ii = (i-1)*3 +1
+		-- use as an array to avoid unnessesary table creation when we clone paths.
+		path[ii] = maxify
+		path[ii +1] = self.steps + 1
+		path[ii +2] = nil
+		if path.nGroups<i then path.nGroups=i end
+		print("start group", i, state, path)
+	end
+end
+function stopGroup(i)
+	return function (self, state, c, path)
+		local ii = (i-1)*3 +1
+		if path[ii +1] then
+			if path.nGroups<i then path.nGroups=i end
+			path[ii +2] = self.steps
+		end
+		print("stop group", i, state, path)
+	end
+end
 -- function buildNFA(Tree, NDFA) return NDFA builds an NFA from the given regex AST
 function buildNDFA(ast, state) 
 	local mt = {}
@@ -412,31 +506,25 @@ function buildNDFA(ast, state)
 --]]
 	function fragments.STAR(machines, buildState)
 		local m = NDFA.new()
+		local m1 = machines[1]
+		local m2 = NDFA.new()
 		m.start.isFinal = true
-		m:concat(machines[1])
-		local final = m:addState(m.start, "EPSILON", true)
-		print("startgrouper", m.start)
-		print("finalgrouper", final)
-		m:addEdge(final,"EPSILON", m.start)
-		local finalStates = machines[1]:final()
-		for _,s in pairs(finalStates) do
-			m:addEdge(s, "EPSILON", final)
-		end
+		m2.start.isFinal = true
+		local finalStates = m1:final()
+		m:concat(m1):concat(m2)
+		
+
 		buildState.groupN = buildState.groupN + 1
 		local i= buildState.groupN
-		function m.start.hit(self, state, c, path)
-			print("start group")
-			-- use as an array to avoid unnessesary table creation when we clone paths.
-			path[i*3] = true
-			path[i*3 +1] = self.steps
-			path[i*3 +2] = nil
+
+		local start = m1.start
+		for _,stop in pairs(finalStates) do
+			m:addEdge(stop,"EPSILON", start)
+			m:addEdge(start,"EPSILON", stop)
 		end
-		function final.hit(self, state, c, path)
-			print("what", path)
-			if path[i*3 +1] then
-				path[i*3 +2] = self.steps
-			end
-		end
+		m.start.hit = startGroup(i, true)
+		m2.start.hit = stopGroup(i)
+
 		return m
 	end
 	fragments["|"] = function(machines)
@@ -463,33 +551,21 @@ function buildNDFA(ast, state)
 		local m1 = NDFA.new()
 		--print("names:", buildState.captureNames)
 		local name = table.remove( buildState.captureNames, 1)
+		buildState.groupN = buildState.groupN + 1
+		local i= buildState.groupN
 		print("capture:", name)
 		m1.start.isFinal = true
 		m1.start.captureName = name
-		m1.start.hit = function(self,state,c)
-			local match = {name=state.captureName, start=self.steps}
-			print("start name:", match.name)
-			self.partialMatches[state.captureName] = match
-		end
+
+		m1.start.hit = startGroup(i, true)
+
 		local m2 = machines[1]
 		local m3 = NDFA.new()
 		m3.start.isFinal =  true
 		m3.start.captureName = name
-		m3.start.hit = function(self,state,c)
-			local name = state.captureName
-			print("name", name)
-			local match = self.partialMatches[name]
-			match.finish = self.steps
-			self.partialMatches[name] = nil
 
-			print("name2:",name)
-			print("match", match.start, match.finish)
+		m3.start.hit = stopGroup(i)
 
-			if not self.subMatches[name] then self.subMatches[name] = {} end
-			table.insert(self.subMatches[name], match)
-		end
-
-		print("c2")
 		m1:concat(m2):concat(m3)
 		return m1
 	end
@@ -501,6 +577,7 @@ function buildNDFA(ast, state)
 	end
 	if not children then print("???") end
 	local m = fragments[(ast.val or "EMPTY")](children, state)
+	m.nGroups = state.groupN
 	return m
 end
 

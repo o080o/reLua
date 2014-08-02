@@ -99,10 +99,24 @@ end
 
 
 
+-- functions in grammar table take an AST and a stack, and return an AST.
+-- the stack is used for open/close parens, alternations, etc, by pushing the current AST onto the stack, and concatenating to it later by poping it off the stack.
 grammar = {}
 grammar.ESC = "/"
 grammar.literal=function(root,stack,c)
 	root.children[1] = root.children[1]:concat(Tree.new(c))
+	return root
+end
+grammar["."]=function(root,stack)
+	root.children[1] = root.children[1]:concat(Tree.new("DOT"))
+	return root
+end
+grammar["?"]=function(root,stack)
+	if root.children[1].val == "CONCAT" then
+		root.children[1].children[2] = Tree.new("QUESTION", {root.children[1].children[2]})
+	else
+		root.children[1] = Tree.new("QUESTION", {root.children[1]})
+	end
 	return root
 end
 grammar["+"]=function(root,stack)
@@ -374,17 +388,24 @@ function NDFA:step(input)
 	local nextState = {}
 	local isAlive = false
 	self.steps = self.steps + 1
-	for state,path in pairs(self.curState) do
-		for _,s in pairs(self.edges[state][input]) do
-			isAlive = true
-			newstates = eClosure(self, s)
-			for state,fs in pairs(newstates) do
-				local newpath = copy( path )
-				for _,f in ipairs(fs) do
-					f(self, state, input, newpath)
-				end
-				nextState[state] = compare( newpath, nextState[state] )
+	function addState(s, path)
+		isAlive = true
+		newstates = eClosure(self, s)
+		for state,fs in pairs(newstates) do
+			local newpath = copy( path )
+			for _,f in ipairs(fs) do
+				f(self, state, input, newpath)
 			end
+			nextState[state] = compare( newpath, nextState[state] )
+		end
+	end
+
+	for state,path in pairs(self.curState) do
+		for _,s in pairs(self.edges[state]["DOT"])do
+			addState(s, path)
+		end
+		for _,s in pairs(self.edges[state][input]) do
+			addState(s, path)
 		end
 	end
 	self.curState = nextState
@@ -504,16 +525,47 @@ function buildNDFA(ast, state)
 		end
 		return m0
 	end
---[[
-	function fragments.PLUS(machines)
-		local m = machines[1]
-		local finalStates = m:final()
-		for _,s in pairs(finalStates) do
-			m:addEdge(s, "EPSILON", m.start)
-		end
+	function fragments.DOT(machines)
+		local m = NDFA.new()
+		m:addState(m.start,"DOT",true)
 		return m
 	end
---]]
+	function fragments.QUESTION(machines, buildState)
+		local m = NDFA.new()
+		local m1 = machines[1]
+		local m2 = NDFA.new()
+		m.start.isFinal = true
+		m2.start.isFinal = true
+		m:concat(m1):concat(m2)
+
+		buildState.groupN = buildState.groupN + 1
+		local i= buildState.groupN
+		m.start.hit = startGroup(i, true)
+		m2.start.hit = stopGroup(i)
+		m:addEdge(m.start, "EPSILON", m2.start)
+		return m
+	end
+	function fragments.PLUS(machines, buildState)
+		local m = NDFA.new()
+		local m1 = machines[1]
+		local m2 = NDFA.new()
+		m.start.isFinal = true
+		m2.start.isFinal = true
+		local finalStates = m1:final()
+		m:concat(m1):concat(m2)
+
+		buildState.groupN = buildState.groupN + 1
+		local i= buildState.groupN
+
+		local start = m1.start
+		for _,stop in pairs(finalStates) do
+			m:addEdge(stop,"EPSILON", start)
+		end
+		m.start.hit = startGroup(i, true)
+		m2.start.hit = stopGroup(i)
+
+		return m
+	end
 	function fragments.MINUS(machines, buildState)
 		local m = fragments.STAR(machines, buildState)
 		local i= buildState.groupN

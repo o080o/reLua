@@ -74,7 +74,7 @@ end
 -- function Tree.print(Tree self) Print the tree to stdout
 function Tree.print(self, indent)
 	local indent = indent or ""
-	local val = self.val or "EMPTY"
+	local val = tostring(self.val) or "EMPTY"
 	print(indent .. "->" .. val)
 	for _,t in pairs(self.children) do
 		t:print( indent .. "|" )
@@ -99,16 +99,71 @@ end
 
 
 
--- functions in grammar table take an AST and a stack, and return an AST.
+-- functions in grammar table take an AST,a stack, and a string (the unparsed input), and return an AST, and optionally an integer number of characterss to skip for parsing
 -- the stack is used for open/close parens, alternations, etc, by pushing the current AST onto the stack, and concatenating to it later by poping it off the stack.
-grammar = {}
-grammar.ESC = "/"
-grammar.literal=function(root,stack,c)
+grammar = setmetatable({}, {__index=function(t,k) return function(root, stack) return grammar.literal(root, stack, k) end end})
+grammar.ESC = "/" --define the escape character
+
+grammar.literal=function(root, stack, c)
 	root.children[1] = root.children[1]:concat(Tree.new(c))
 	return root
 end
+
+function CharacterClass(negate)
+	negate = negate or false
+	local self
+	self = DefaultTable(negate)
+	self.isCharacterClass = true
+	mt = getmetatable(self)
+	function mt.__tostring(self)
+		local str = {}
+		table.insert(str, "[")
+		if negate then table.insert(str, "^") end
+		for k,v in pairs(self) do
+			if k ~= "isCharacterClass" then
+				if negate and not v or not negate and v then table.insert(str, k) end
+			end
+		end
+		table.insert(str, "]")
+		return table.concat(str)
+	end
+	return self
+end
+
+testclass = CharacterClass(true)
+print (testclass["b"])
+assert(testclass["b"])
+
+local dotclass = CharacterClass(true)
+local charclasses=0
+grammar["["]=function(root,stack,str)
+	local class = CharacterClass()
+	local i=0
+	for c in str:gmatch(".") do
+		i = i+1
+		if i == 1 and c == "^" then
+			negate = true
+			class = CharacterClass(true)
+		elseif c == grammar.ESC and not escaped then 
+			escaped = true
+		elseif c == "]" and not escaped then
+			break
+		else
+			if not negate then
+				class[c] = true
+			else
+				class[c] = false
+			end
+		end
+	end
+	print("New character class:", charclasses+1, class)
+	-- we could test for duplicate classes here as well..
+	charclasses=charclasses+1
+	root.children[1] = root.children[1]:concat(Tree.new(class))
+	return root,i
+end
 grammar["."]=function(root,stack)
-	root.children[1] = root.children[1]:concat(Tree.new("DOT"))
+	root.children[1] = root.children[1]:concat(Tree.new(dotclass))
 	return root
 end
 grammar["?"]=function(root,stack)
@@ -209,9 +264,11 @@ end
 --function NDFA:addEdge(State source, Input input, State dest) create an edge leading from source to dest given the input.
 function NDFA:addEdge(source, input, dest)
 	print(source, input, dest)
-	if not self.edges[source] then self.edges[source] = {} end
-	if not self.edges[source][input] then self.edges[source][input] = {} end
-	table.insert(self.edges[source][input], dest )
+	if type(input) == "table" and input.isCharacterClass then
+		self.edges[source]["CLASS"][input] = dest
+	else
+		table.insert(self.edges[source][input], dest )
+	end
 end
 
 --function NDFA:insert(NDFA m) return NDFA A machine with the states and edges of m added to self with no link between them. 
@@ -401,8 +458,12 @@ function NDFA:step(input)
 	end
 
 	for state,path in pairs(self.curState) do
-		for _,s in pairs(self.edges[state]["DOT"])do
-			addState(s, path)
+		for table,s in pairs(self.edges[state]["CLASS"])do
+			if table[input] then
+				addState(s, path)
+			else
+				print("failed:", table, input)
+			end
 		end
 		for _,s in pairs(self.edges[state][input]) do
 			addState(s, path)
@@ -644,12 +705,12 @@ function buildNDFA(ast, state)
 		children[i] = m
 	end
 	if not children then print("???") end
-	local m = fragments[(ast.val or "EMPTY")](children, state)
-	m.nGroups = state.groupN
+	local val = ast.val or "Empty"
+	local m = fragments[val](children, state)
 	return m
 end
 
---function parse(String) return Tree An AST of the Regex language to easy the creation of the final NFA
+--function parse(String) return Tree An AST of the Regex language to ease the creation of the final NFA
 function parse(regex)
 	local root = Tree.new("ROOT", {Tree.new()})
 	local realroot = root
@@ -657,7 +718,13 @@ function parse(regex)
 	local stack = Stack.new()
 	-- parse the regex grammar
 	local escaped = false
-	for c in regex:gmatch(".") do
+	local characterclass = true
+	local i=0
+	while i < #regex do
+		i=i+1
+		local c= regex:sub(i,i)
+		local rest= regex:sub(i+1) or ""
+		print("p:", c, rest)
 		if escaped then
 			if grammar[ grammar.ESC .. c ] then
 				root = grammar[grammar.ESC..c](root, stack)
@@ -666,10 +733,9 @@ function parse(regex)
 			end
 		elseif c == grammar.ESC then
 			escaped = true
-		elseif grammar[c] then
-			root = grammar[c](root, stack)
 		else
-			root = grammar.literal(root, stack, c)
+			root,n = grammar[c](root, stack, rest)
+			if n then i=i+n end
 		end
 	end
 	assert(not stack:pop(), "Regex parse stack is not empty. Possible missing close paren?")

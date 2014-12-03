@@ -1,9 +1,13 @@
 data = require("reData")
+local print = function(...) end -- eliminate debug printing
 local Stack = data.Stack
 local Tree = data.Tree
 local CharacterClass = data.CharacterClass
 
 local dotclass = CharacterClass("[^]")
+getmetatable(dotclass).__tostring = function(self)
+	return "."
+end
 
 function addNode(root, n)
 	root.children[1] = root.children[1]:concat(n)
@@ -40,13 +44,21 @@ grammar = setmetatable({}, {__index=function(t,k) return function(root, stack) r
 ESC = "/" --define the escape character
 
 grammar.literal=function(root, stack, c)
-	root.children[1] = root.children[1]:concat(Tree.new(c))
-	return root
+	return addNode(root, Tree.new(c))
 end
 grammar.multi = {}
-grammar.multi["(?R)"]=newNode("RECURSE")
-grammar[ESC.."R"]=grammar.multi["(?R)"]
+grammar.multi["R"]=function(root, stack)
+	addNode(root, Tree.new("RECURSE"))
+	stack:push(root)
+	return Tree.new("EMPTY", {Tree.new()})
+end
+grammar[ESC.."R"]=newNode("RECURSE")
 
+grammar["."]=newNode(dotclass)
+grammar["+"]=newRepetition("PLUS")
+grammar["-"]=newRepetition("MINUS")
+grammar["*"]=newRepetition("STAR")
+grammar["?"]=newRepetition("QUESTION")
 grammar["["]=function(root,stack,str)
 	local i=0
 	for c in str:gmatch(".") do
@@ -62,25 +74,30 @@ grammar["["]=function(root,stack,str)
 	addNode(root, Tree.new(class))
 	return root,i
 end
-grammar["."]=newNode(dotclass)
-grammar["?"]=newRepetition("QUESTION")
-grammar["+"]=newRepetition("PLUS")
-grammar["-"]=newRepetition("MINUS")
-grammar["*"]= newRepetition("STAR")
 grammar["|"]=function(root,stack)
-	newroot = Tree.new("EMPTY", {Tree.new()})
+	local newroot = Tree.new("EMPTY", {Tree.new()})
 	root.children[1] = Tree.new("|", {root.children[1], newroot})
 	return newroot
 end
-grammar["("]=function(root,stack)
-	newroot = Tree.new("CAPTURE", {Tree.new()})
-	root.children[1] = root.children[1]:concat(newroot)
-	stack:push(root)
-	return newroot
+grammar["("]=function(root,stack, rest)
+	if rest:sub(1,1) == "?" then
+		local s = rest:sub(2)
+		for k,v in pairs(grammar.multi) do
+			local i,j s:find(k)
+			if i==1 then
+				v(root, stack, rest)
+				break
+			end
+		end
+	else
+		local newroot = Tree.new("CAPTURE", {Tree.new()})
+		addNode(root, newroot)
+		stack:push(root)
+		return newroot
+	end
 end
 grammar[")"]=function(root,stack)
-	newroot = stack:pop()
-	return newroot
+	return stack:pop()
 end
 
 
@@ -96,7 +113,7 @@ function P.parse(regex)
 	local i=0
 	while i < #regex do
 		i=i+1
-		local c= regex:sub(i,i)
+		local c = regex:sub(i,i)
 		local rest= regex:sub(i+1) or ""
 		print("p:", c, rest)
 		if escaped then
@@ -113,7 +130,7 @@ function P.parse(regex)
 		end
 	end
 	assert(not stack:pop(), "Regex parse stack is not empty. Possible missing close paren?")
-	realroot:print()
+	print(realroot)
 	return realroot
 end
 

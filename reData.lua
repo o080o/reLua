@@ -133,6 +133,23 @@ function Tree.print(self, indent)
 		t:print( indent .. "|" )
 	end
 end
+function Tree.__tostring2(self, indent, str)
+	local val = tostring(self.val) or "EMPTY"
+	for i=1,indent do
+		table.insert(str, "|")
+	end
+	table.insert(str, "_>")
+	table.insert(str, val)
+	table.insert(str, "\n")
+	for _,c in pairs(self.children) do
+		c:__tostring2(indent+1, str)
+	end
+end
+function Tree.__tostring(self)
+	local s = {}
+	self:__tostring2(0, s)
+	return table.concat(s)
+end
 
 -- object Stack a filo stack. 
 local Stack = {}

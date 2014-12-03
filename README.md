@@ -6,4 +6,11 @@ reLua exists for people who want regex's with more power than Lua's built-in pat
 
 This is written by myself, for myself, and the code is here for other people's convenience. If you like it, let me know! I'd love to hear about it!
 
+basic usage:
+```
+  re = require("re")
+  local regex = re.compile("r(e*)gex?")
+  local match = regex:execute("input string")
+  pring( match[1] )
+```
 The code is licensed under the ZLib license.

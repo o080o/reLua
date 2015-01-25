@@ -11,6 +11,6 @@ basic usage:
   re = require("re")
   local regex = re.compile("r(e*)gex?")
   local match = regex:execute("input string")
-  pring( match[1] )
+  print( match[1] )
 ```
 The code is licensed under the ZLib license.

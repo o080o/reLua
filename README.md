@@ -1,4 +1,4 @@
-#About
+# About
 
 reLua is a pure lua regular expression library that uses a breadth-first NFA algorithm to match in linear time with respect to the input string, avoiding pathological exponential running times of most common regex algorithms. Submatches are supported using parentheses, as well as alternations, kleen star, lazy repetitions, and character groups, to name a few features. The algorithm can easily be extended to include back references and recursion, however it is not currently supported.
 

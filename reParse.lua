@@ -47,6 +47,7 @@ grammar.literal=function(root, stack, c)
 	return addNode(root, Tree.new(c))
 end
 grammar.multi = {}
+-- recursion NYI... (\R)
 grammar.multi["R"]=function(root, stack)
 	addNode(root, Tree.new("RECURSE"))
 	stack:push(root)

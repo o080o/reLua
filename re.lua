@@ -1,5 +1,5 @@
-data = require("reData")
-parser = require("reParse")
+local data = require("reData")
+local parser = require("reParse")
 
 local DefaultTable = data.DefaultTable
 local ListTable = data.ListTable

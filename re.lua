@@ -280,7 +280,7 @@ function NDFA:step(input)
 end
 
 function NDFA.__tostring(self)
-	return "NDFA: " .. self
+	return "NDFA: " .. self.regex
 end
 
 --function eClosure(NDFA, Int) return {State:[Function]} List of all states accessible via epsilon transitions from the given state, and a list of functions to execute for that state. This function is cached, and the returned table should NOT be modified.

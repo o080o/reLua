@@ -40,7 +40,7 @@ local P = {}
 
 -- functions in grammar table take an AST,a stack, and a string (the unparsed input), and return an AST, and optionally an integer number of characterss to skip for parsing
 -- the stack is used for open/close parens, alternations, etc, by pushing the current AST onto the stack, and concatenating to it later by poping it off the stack.
-grammar = setmetatable({}, {__index=function(t,k) return function(root, stack) return grammar.literal(root, stack, k) end end})
+grammar = {}
 ESC = "/" --define the escape character
 
 grammar.literal=function(root, stack, c)
@@ -126,8 +126,12 @@ function P.parse(regex)
 		elseif c == ESC then
 			escaped = true
 		else
-			root,n = grammar[c](root, stack, rest)
-			if n then i=i+n end
+			if grammar[c] then
+				root,n = grammar[c](root, stack, rest)
+				if n then i=i+n end
+			else
+				root = grammar.literal(root, stack, c)
+			end
 		end
 	end
 	assert(not stack:pop(), "Regex parse stack is not empty. Possible missing close paren?")

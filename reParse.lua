@@ -118,6 +118,7 @@ function P.parse(regex)
 		local rest= regex:sub(i+1) or ""
 		print("p:", c, rest)
 		if escaped then
+			escaped = false
 			if grammar[ ESC .. c ] then
 				root = grammar[ESC..c](root, stack)
 			else

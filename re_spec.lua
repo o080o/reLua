@@ -37,5 +37,9 @@ describe("re execute", function()
 		assert.regex_matches("abc" .. ESC .. "+abc", "abc+abc")
 		assert.regex_matches(ESC .. ".", ".")
 		assert.not_regex_matches(ESC .. ".", "!")
+
+		-- Multiple escapes
+		assert.regex_matches(ESC .. "." .. ESC .. "..", "..a")
+		assert.not_regex_matches(ESC .. "." .. ESC .. "..", ".ab")
 	end)
 end)

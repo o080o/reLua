@@ -1,4 +1,4 @@
-data = require("reData")
+local data = require("reData")
 local print = function(...) end -- eliminate debug printing
 local Stack = data.Stack
 local Tree = data.Tree

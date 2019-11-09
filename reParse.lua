@@ -62,12 +62,15 @@ grammar["*"]=newRepetition("STAR")
 grammar["?"]=newRepetition("QUESTION")
 grammar["["]=function(root,stack,str)
 	local i=0
+	local escaped = false
 	for c in str:gmatch(".") do
 		i = i+1
 		if c == ESC and not escaped then 
 			escaped = true
 		elseif c == "]" and not escaped then
 			break
+		elseif escaped then
+			escaped = false
 		end
 	end
 	local class = CharacterClass( "["..str:sub(1,i))
@@ -118,6 +121,7 @@ function P.parse(regex)
 		local rest= regex:sub(i+1) or ""
 		print("p:", c, rest)
 		if escaped then
+			escaped = false
 			if grammar[ ESC .. c ] then
 				root = grammar[ESC..c](root, stack)
 			else

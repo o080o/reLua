@@ -37,5 +37,35 @@ describe("re execute", function()
 		assert.regex_matches("abc" .. ESC .. "+abc", "abc+abc")
 		assert.regex_matches(ESC .. ".", ".")
 		assert.not_regex_matches(ESC .. ".", "!")
+
+		-- Multiple escapes
+		assert.regex_matches(ESC .. "." .. ESC .. "..", "..a")
+		assert.not_regex_matches(ESC .. "." .. ESC .. "..", ".ab")
+	end)
+
+	describe("character classes", function()
+		it("should match basic classes", function()
+			assert.regex_matches("ab[cdef]+gh", "abcgh")
+			assert.regex_matches("ab[cdef]+gh", "abcdegh")
+			assert.not_regex_matches("ab[cdef]+gh", "abzgh")
+		end)
+
+		it("should allow ']' to be escaped", function()
+			assert.regex_matches("a[b" .. ESC .. "]]+gh." .. ESC .. ".", "ab]gh!.")
+		end)
+
+		it("should allow / to be escaped", function()
+		assert.regex_matches("a[" .. ESC .. ESC .. "]+gh." .. ESC .. ".",
+			"a" .. ESC .. ESC .. "gh!.")
+		end)
+
+		it("shouldn't affect escaping outside the class", function()
+			assert.regex_matches("[a" .. ESC .. "]]+b" .. ESC .. ".", "a]ab.")
+			assert.not_regex_matches("[a" .. ESC .. "]]+b" .. ESC .. ".", "a]ab!")
+		end)
+
+		it("should not include / in the class", function()
+			assert.not_regex_matches("a[b" .. ESC .. "]]+c", "a" .. ESC .. "c")
+		end)
 	end)
 end)

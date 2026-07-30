@@ -13,7 +13,7 @@ character classes via "[...]", "+", "-".
 
 For a full list, check out the *grammar* object in  reParse.lua
 
-in addition, at the moment, matches always start at the begining of the string, and match
+in addition, at the moment, matches always start at the beginning of the string, and match
 until the end. (so, anchors like "^" are basically always on... maybe add ".-" to
 the start of a regex?)
 
